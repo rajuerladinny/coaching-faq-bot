@@ -107,6 +107,11 @@ tracker. The customers are the same, so this work carries over.
 - [x] Plan written
 - [x] Backend: content storage, retrieval, chat endpoint, leads
 - [x] Frontend: chat page and admin page
+- [x] Owner login; each owner limited to their own centre
+- [x] Per-visitor rate limits on chat, callbacks and login
+- [x] Dockerfile for single-container deployment
+- [ ] First end-to-end run on a laptop (API routes, React app, Docker build)
 - [ ] Owner interviews
-- [ ] Admin authentication (the admin API is open; do not deploy publicly yet)
-- [ ] Deployment
+- [ ] Pick a host and deploy with HTTPS, a persistent volume and SECRET_KEY
+- [ ] Connect a real LLM and compare its answers with mock mode
+- [ ] First pilot centre

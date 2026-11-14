@@ -14,6 +14,10 @@ LIMIT_REACHED = (
     "Our assistant is unavailable right now. Share your name and phone "
     "number and our team will call you back."
 )
+SLOW_DOWN = (
+    "You're sending messages quickly. Please wait a few minutes, or share "
+    "your name and phone number and our team will call you back."
+)
 MIN_SCORE = float(os.environ.get("MIN_SCORE", "0.3"))
 MONTHLY_CAP = int(os.environ.get("MONTHLY_MESSAGE_CAP", "1000"))
 

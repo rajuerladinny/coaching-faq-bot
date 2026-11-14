@@ -45,14 +45,49 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first version."""
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(centres)")}
+        if "owner_email" not in cols:
+            self.db.execute("ALTER TABLE centres ADD COLUMN owner_email TEXT")
+        if "password_hash" not in cols:
+            self.db.execute("ALTER TABLE centres ADD COLUMN password_hash TEXT")
+        self.db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_centres_owner_email"
+            " ON centres(owner_email)"
+        )
+        self.db.commit()
 
     # centres -------------------------------------------------------------
-    def create_centre(self, name: str) -> int:
+    def create_centre(
+        self, name: str, owner_email: str | None = None,
+        password_hash: str | None = None,
+    ) -> int:
+        """Raises sqlite3.IntegrityError if the email is already in use."""
+        email = owner_email.strip().lower() if owner_email else None
         cur = self.db.execute(
-            "INSERT INTO centres (name, created_at) VALUES (?, ?)", (name, _now())
+            "INSERT INTO centres (name, owner_email, password_hash, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (name, email, password_hash, _now()),
         )
         self.db.commit()
         return cur.lastrowid
+
+    def get_centre_by_email(self, owner_email: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT * FROM centres WHERE owner_email = ?",
+            (owner_email.strip().lower(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_owner(self, centre_id: int, owner_email: str, password_hash: str) -> None:
+        self.db.execute(
+            "UPDATE centres SET owner_email = ?, password_hash = ? WHERE id = ?",
+            (owner_email.strip().lower(), password_hash, centre_id),
+        )
+        self.db.commit()
 
     def get_centre(self, centre_id: int) -> dict | None:
         row = self.db.execute(
@@ -61,7 +96,7 @@ class Store:
         return dict(row) if row else None
 
     def list_centres(self) -> list[dict]:
-        rows = self.db.execute("SELECT id, name FROM centres ORDER BY id").fetchall()
+        rows = self.db.execute("SELECT id, name, owner_email FROM centres ORDER BY id").fetchall()
         return [dict(r) for r in rows]
 
     def set_content(self, centre_id: int, content: str, chunks: list[str]) -> None:
