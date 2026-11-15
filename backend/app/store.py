@@ -58,6 +58,15 @@ class Store:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_centres_owner_email"
             " ON centres(owner_email)"
         )
+        lead_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(leads)")}
+        if "status" not in lead_cols:
+            self.db.execute(
+                "ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'new'"
+            )
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_centre_created"
+            " ON messages(centre_id, created_at)"
+        )
         self.db.commit()
 
     # centres -------------------------------------------------------------
@@ -142,7 +151,50 @@ class Store:
         ).fetchall()
         return [r["question"] for r in rows]
 
+    def stats(self, centre_id: int, unanswered_answer: str) -> dict:
+        """This month's activity and the questions the bot could not answer.
+
+        `unanswered_answer` is the fallback text, so messages turned away by
+        the monthly cap are not reported as gaps in the centre's content.
+        """
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        totals = self.db.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(answered), 0) AS answered"
+            " FROM messages WHERE centre_id = ? AND created_at LIKE ?",
+            (centre_id, month + "%"),
+        ).fetchone()
+        leads = self.db.execute(
+            "SELECT COUNT(*) AS n,"
+            " COALESCE(SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END), 0) AS new"
+            " FROM leads WHERE centre_id = ?",
+            (centre_id,),
+        ).fetchone()
+        gaps = self.db.execute(
+            "SELECT MIN(question) AS question, COUNT(*) AS times,"
+            " MAX(created_at) AS last_asked FROM messages"
+            " WHERE centre_id = ? AND answered = 0 AND answer = ?"
+            " GROUP BY lower(trim(question))"
+            " ORDER BY times DESC, last_asked DESC LIMIT 10",
+            (centre_id, unanswered_answer),
+        ).fetchall()
+        return {
+            "messages_this_month": totals["n"],
+            "answered_this_month": totals["answered"],
+            "leads_total": leads["n"],
+            "leads_new": leads["new"],
+            "unanswered": [dict(g) for g in gaps],
+        }
+
     # leads ---------------------------------------------------------------
+    def set_lead_status(self, centre_id: int, lead_id: int, status: str) -> bool:
+        """Returns False when the lead does not belong to this centre."""
+        cur = self.db.execute(
+            "UPDATE leads SET status = ? WHERE id = ? AND centre_id = ?",
+            (status, lead_id, centre_id),
+        )
+        self.db.commit()
+        return cur.rowcount == 1
+
     def add_lead(self, centre_id, session_id, name, phone, note="") -> int:
         cur = self.db.execute(
             "INSERT INTO leads (centre_id, session_id, name, phone, note,"

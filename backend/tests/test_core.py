@@ -166,3 +166,69 @@ def test_rate_limiter_blocks_then_recovers():
     assert not limiter.allow("a", now=2)
     assert limiter.allow("b", now=2)  # other visitors are unaffected
     assert limiter.allow("a", now=11)  # first hit has left the window
+
+
+# --- insights, previews, lead follow-up ------------------------------------
+from app.retrieval import topics
+
+
+def test_topics_come_from_the_owners_labels():
+    assert topics(CONTENT) == ["Fees", "Timings", "Demo class", "Address"]
+    assert topics("No labels here.\n\nhttp://example.com: not a label") == []
+    assert topics("Fees: a\n\nfees: b\n\nTimings: c", limit=1) == ["Fees"]
+
+
+def test_preview_answers_without_saving_or_counting():
+    store, cid = make_store()
+    result = chat.preview(store, cid, "Is there a demo class?")
+    assert result["answered"] is True
+    assert chat.preview(store, cid, "Do you sell pizza?")["answered"] is False
+    assert store.messages_this_month(cid) == 0
+
+
+def test_stats_report_activity_and_content_gaps(monkeypatch):
+    store, cid = make_store()
+    chat.answer(store, cid, "s1", "What are the fees?")
+    chat.answer(store, cid, "s1", "Do you have a hostel?")
+    chat.answer(store, cid, "s2", "do you have a hostel? ")
+    chat.answer(store, cid, "s2", "Is parking available?")
+    store.add_lead(cid, "s2", "Anita", "+919876543210")
+    stats = chat.insights(store, cid)
+    assert stats["messages_this_month"] == 4
+    assert stats["answered_this_month"] == 1
+    assert (stats["leads_total"], stats["leads_new"]) == (1, 1)
+    assert [(g["question"], g["times"]) for g in stats["unanswered"]] == [
+        ("Do you have a hostel?", 2),
+        ("Is parking available?", 1),
+    ]
+    assert stats["monthly_cap"] == chat.MONTHLY_CAP
+    # Messages turned away by the cap are not content gaps.
+    monkeypatch.setattr(chat, "MONTHLY_CAP", 1)
+    chat.answer(store, cid, "s3", "What are the fees?")
+    assert len(chat.insights(store, cid)["unanswered"]) == 2
+
+
+def test_lead_status_is_limited_to_the_owning_centre():
+    store, cid = make_store()
+    other = store.create_centre("Other Centre")
+    lead_id = store.add_lead(cid, "s1", "Anita", "+919876543210")
+    assert store.list_leads(cid)[0]["status"] == "new"
+    assert store.set_lead_status(other, lead_id, "contacted") is False
+    assert store.set_lead_status(cid, lead_id, "contacted") is True
+    assert store.list_leads(cid)[0]["status"] == "contacted"
+    assert store.stats(cid, chat.FALLBACK)["leads_new"] == 0
+
+
+def test_migration_adds_lead_status_to_an_old_database(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "old-leads.db")
+    old = Store(path)
+    cid = old.create_centre("Old")
+    old.add_lead(cid, "s1", "Ravi", "+919000000000")
+    old.db.close()
+    db = sqlite3.connect(path)
+    db.execute("ALTER TABLE leads DROP COLUMN status")
+    db.commit()
+    db.close()
+    assert Store(path).list_leads(cid)[0]["status"] == "new"

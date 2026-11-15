@@ -3,7 +3,7 @@ import os
 from typing import Callable
 
 from . import llm
-from .retrieval import chunk_text, rank
+from .retrieval import chunk_text, rank, topics
 from .store import Store
 
 FALLBACK = (
@@ -46,21 +46,50 @@ def answer(
     if store.messages_this_month(centre_id) >= MONTHLY_CAP:
         result = {"answer": LIMIT_REACHED, "answered": False}
     else:
-        ranked = rank(question, store.get_chunks(centre_id))
-        relevant = [chunk for chunk, score in ranked if score >= MIN_SCORE]
-        if not relevant:
-            result = {"answer": FALLBACK, "answered": False}
-        else:
-            try:
-                text = generate(centre["name"], relevant, question)
-            except Exception:
-                text = "UNSURE"  # LLM down: never show an error to a parent
-            if not text or text.strip().upper().startswith("UNSURE"):
-                result = {"answer": FALLBACK, "answered": False}
-            else:
-                result = {"answer": text.strip(), "answered": True}
+        result = _decide(store, centre, question, generate)
 
     store.add_message(
         centre_id, session_id, question, result["answer"], result["answered"]
     )
     return result
+
+
+def _decide(store: Store, centre: dict, question: str, generate) -> dict:
+    ranked = rank(question, store.get_chunks(centre["id"]))
+    relevant = [chunk for chunk, score in ranked if score >= MIN_SCORE]
+    if not relevant:
+        return {"answer": FALLBACK, "answered": False}
+    try:
+        text = generate(centre["name"], relevant, question)
+    except Exception:
+        text = "UNSURE"  # LLM down: never show an error to a parent
+    if not text or text.strip().upper().startswith("UNSURE"):
+        return {"answer": FALLBACK, "answered": False}
+    return {"answer": text.strip(), "answered": True}
+
+
+def preview(
+    store: Store,
+    centre_id: int,
+    question: str,
+    generate: Callable[[str, list[str], str], str] = llm.generate,
+) -> dict:
+    """Answer as the bot would, for the owner trying it out.
+
+    Nothing is saved, so previews never count towards the monthly cap or
+    show up as parent questions.
+    """
+    centre = store.get_centre(centre_id)
+    if centre is None:
+        raise KeyError(centre_id)
+    return _decide(store, centre, question, generate)
+
+
+def insights(store: Store, centre_id: int) -> dict:
+    stats = store.stats(centre_id, FALLBACK)
+    stats["monthly_cap"] = MONTHLY_CAP
+    return stats
+
+
+def suggested_topics(centre: dict) -> list[str]:
+    return topics(centre["content"])

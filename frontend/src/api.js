@@ -1,4 +1,12 @@
+import { createDemoApi } from "./lib/demo.js";
+
+// Demo mode runs entirely in the browser: a build with VITE_DEMO_MODE=true, or ?demo in the URL.
+export const DEMO =
+  import.meta.env.VITE_DEMO_MODE === "true" ||
+  new URLSearchParams(window.location.search).has("demo");
+
 const TOKEN_KEY = "faqbot_owner_token";
+const TIMEOUT_MS = 20000;
 let token = null;
 try {
   token = window.localStorage.getItem(TOKEN_KEY);
@@ -21,11 +29,21 @@ export class AuthError extends Error {}
 async function request(path, options = {}) {
   const headers = { "Content-Type": "application/json" };
   if (options.auth && token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, {
-    method: options.method || "GET",
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch {
+    throw new Error("Could not reach the server. Check your connection and try again.");
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     const message =
@@ -39,7 +57,7 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-export const api = {
+const httpApi = {
   isLoggedIn: () => Boolean(token),
   logout: () => setToken(null),
   login: async (email, password) => {
@@ -56,6 +74,11 @@ export const api = {
   saveContent: (content) =>
     request("/admin/content", { method: "PUT", body: { content }, auth: true }),
   listLeads: () => request("/admin/leads", { auth: true }),
+  setLeadStatus: (leadId, status) =>
+    request(`/admin/leads/${leadId}`, { method: "PATCH", body: { status }, auth: true }),
+  stats: () => request("/admin/stats", { auth: true }),
+  preview: (question) =>
+    request("/admin/preview", { method: "POST", body: { question }, auth: true }),
 
   // public
   publicCentre: (id) => request(`/centres/${id}`),
@@ -67,3 +90,5 @@ export const api = {
   addLead: (id, lead) =>
     request(`/centres/${id}/leads`, { method: "POST", body: lead }),
 };
+
+export const api = DEMO ? createDemoApi() : httpApi;

@@ -6,6 +6,7 @@ Every /api/admin route works only on the logged-in owner's own centre.
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,19 @@ SECRET = auth.load_secret()
 chat_limiter = RateLimiter(int(os.environ.get("CHAT_LIMIT", "20")), 600)
 lead_limiter = RateLimiter(5, 3600)
 login_limiter = RateLimiter(10, 900)
+# Per centre: owner previews call the LLM, so they are capped too.
+preview_limiter = RateLimiter(30, 600)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.path.startswith("/api/"):
+        # API responses hold leads and login tokens; never cache them.
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 class LoginIn(BaseModel):
@@ -39,6 +53,14 @@ class LoginIn(BaseModel):
 
 class ContentIn(BaseModel):
     content: str = Field(max_length=50_000)
+
+
+class PreviewIn(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+
+
+class LeadStatusIn(BaseModel):
+    status: Literal["new", "contacted"]
 
 
 class ChatIn(BaseModel):
@@ -106,11 +128,34 @@ def get_leads(centre: dict = Depends(current_centre)):
     return store.list_leads(centre["id"])
 
 
+@app.patch("/api/admin/leads/{lead_id}")
+def patch_lead(lead_id: int, body: LeadStatusIn, centre: dict = Depends(current_centre)):
+    if not store.set_lead_status(centre["id"], lead_id, body.status):
+        raise HTTPException(404, "Lead not found")
+    return {"id": lead_id, "status": body.status}
+
+
+@app.get("/api/admin/stats")
+def get_stats(centre: dict = Depends(current_centre)):
+    return chat.insights(store, centre["id"])
+
+
+@app.post("/api/admin/preview")
+def post_preview(body: PreviewIn, centre: dict = Depends(current_centre)):
+    if not preview_limiter.allow(str(centre["id"])):
+        raise HTTPException(429, "Too many previews. Try again in a few minutes.")
+    return chat.preview(store, centre["id"], body.question.strip())
+
+
 # public (parents and students) --------------------------------------------
 @app.get("/api/centres/{centre_id}")
 def public_centre(centre_id: int):
     centre = _centre_or_404(centre_id)
-    return {"id": centre["id"], "name": centre["name"]}
+    return {
+        "id": centre["id"],
+        "name": centre["name"],
+        "topics": chat.suggested_topics(centre),
+    }
 
 
 @app.post("/api/centres/{centre_id}/chat")
