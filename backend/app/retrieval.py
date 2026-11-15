@@ -52,6 +52,24 @@ def chunk_text(text: str, max_chars: int = 500) -> list[str]:
     return chunks
 
 
+def topics(text: str, limit: int = 6) -> list[str]:
+    """Topic labels the owner wrote, e.g. "Fees" from a "Fees: ..." paragraph.
+
+    The chat page offers these as one-tap questions.
+    """
+    found: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        match = re.match(r"\s*([A-Za-z][A-Za-z0-9 &/'-]{1,28}):\s+\S", paragraph)
+        if not match:
+            continue
+        label = match.group(1).strip()
+        if label.lower() not in (f.lower() for f in found):
+            found.append(label)
+        if len(found) == limit:
+            break
+    return found
+
+
 def rank(question: str, chunks: list[str], top_k: int = 3) -> list[tuple[str, float]]:
     """Return up to top_k (chunk, score) pairs with score > 0, best first.
 

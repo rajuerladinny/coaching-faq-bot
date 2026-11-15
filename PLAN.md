@@ -110,7 +110,11 @@ tracker. The customers are the same, so this work carries over.
 - [x] Owner login; each owner limited to their own centre
 - [x] Per-visitor rate limits on chat, callbacks and login
 - [x] Dockerfile for single-container deployment
-- [ ] First end-to-end run on a laptop (API routes, React app, Docker build)
+- [x] Lead follow-up (contacted status, WhatsApp link, CSV export)
+- [x] Owner insights: unanswered questions, answer rate, monthly usage
+- [x] Owner preview, one-tap topic questions, embeddable chat
+- [x] In-browser demo mode; CI for tests, builds and the Docker image
+- [ ] First end-to-end run on a laptop with a real LLM
 - [ ] Owner interviews
 - [ ] Pick a host and deploy with HTTPS, a persistent volume and SECRET_KEY
 - [ ] Connect a real LLM and compare its answers with mock mode
