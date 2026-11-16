@@ -10,6 +10,8 @@ An AI enquiry assistant for coaching and tuition centres. The owner pastes in
 the centre's details; the bot answers parent and student questions from that
 content only, and captures a name and phone number when it cannot answer.
 
+**Live demo:** https://rajuerladinny.github.io/coaching-faq-bot/ (runs in the browser with sample data; no login)
+
 **Status:** working prototype, not yet piloted with a real centre. See
 [PLAN.md](PLAN.md) for the product plan, pricing and roadmap.
 
